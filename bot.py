@@ -20,8 +20,8 @@ from telegram.ext import (
 logging.basicConfig(level=logging.INFO)
 
 # ========== ការកំណត់ (ត្រូវកែ) ==========
-BOT_TOKEN = "8503137382:AAH1Is0LOT62EmndDsJvin5QNxH1tik47Hg"       # យកពី @BotFather
-ADMIN_CHAT_ID = ID: -5362036603               # Chat ID របស់អ្នកគ្រប់គ្រងហាង (ទទួលការបញ្ជាទិញ)
+BOT_TOKEN = "8567152645:AAGrkdg4Eka5aaqCbLZal6UOQGgKAA2FXBQ"       # យកពី @BotFather
+ADMIN_CHAT_ID =-5362036603               # Chat ID របស់អ្នកគ្រប់គ្រងហាង (ទទួលការបញ្ជាទិញ)
 
 PAYMENT_INFO = {
     "aba": "លេខគណនី ABA: 000 000 000\nឈ្មោះ: [ឈ្មោះអ្នក]",
