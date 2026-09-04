@@ -1,195 +1,202 @@
 """
-Telegram Shop Bot - លក់អាវ
-============================
-Bot សម្រាប់លក់អាវលើ Telegram៖ អតិថិជនអាចមើលទំនិញ ជ្រើសរើសទំហំ ដាក់ក្នុងកន្ត្រក
-ហើយបញ្ជាទិញ។ ពេលបញ្ជាទិញរួច Bot នឹងផ្ញើសេចក្តីសង្ខេបទៅកាន់ Admin (អ្នកលក់)។
+ហាងអនឡាញ Telegram Bot
+======================
+Bot សម្រាប់លក់ទំនិញលើ Telegram - មានកន្ត្រកទំនិញ, ជ្រើសរើសការទូទាត់ (ABA/ACLEDA ឬ COD)
 
-របៀបដំឡើង៖
-1. pip install python-telegram-bot --upgrade
-2. ដាក់ TOKEN ដែលបានពី @BotFather ក្នុងអថេរ BOT_TOKEN ខាងក្រោម
-3. ដាក់ ADMIN_CHAT_ID (chat id របស់អ្នកលក់ ដែលទទួល order) - អាចដឹងបានដោយផ្ញើសារទៅ
-   @userinfobot លើ Telegram
-4. python bot.py
+របៀបប្រើ:
+1. ដំឡើង library:  pip install python-telegram-bot --upgrade
+2. ដាក់ BOT_TOKEN និង ADMIN_CHAT_ID ខាងក្រោម
+3. កែប្រែបញ្ជីទំនិញនៅផ្នែក PRODUCTS
+4. រត់ដោយ:  python bot.py
 """
 
 import logging
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
+    Application, CommandHandler, CallbackQueryHandler,
+    MessageHandler, ConversationHandler, ContextTypes, filters
 )
-
-# ---------------- CONFIGURATION ----------------
-BOT_TOKEN = "8503137382:AAEDE-pHtottu5gHet2HHjpH0OxIbHWqQZ0"  # ពី @BotFather
-ADMIN_CHAT_ID = -5362036603                                     # chat id របស់អ្នកលក់
-
-# ---------------- PRODUCT DATA ----------------
-PRODUCTS = {
-    "shirt1": {
-        "name": "អាវយឺត Basic ពណ៌ស",
-        "price": 8,
-        "sizes": ["S", "M", "L", "XL"],
-    },
-    "shirt2": {
-        "name": "អាវយឺត Oversize ខ្មៅ",
-        "price": 10,
-        "sizes": ["M", "L", "XL"],
-    },
-    "shirt3": {
-        "name": "អាវពូឡូ Navy",
-        "price": 12,
-        "sizes": ["S", "M", "L"],
-    },
-    "shirt4": {
-        "name": "អាវយឺត Graphic ក្រហម",
-        "price": 9,
-        "sizes": ["S", "M", "L", "XL"],
-    },
-}
 
 logging.basicConfig(level=logging.INFO)
 
-# cart ត្រូវបានរក្សាទុកជា user_data (per-chat memory ខណៈពេល bot កំពុងរត់)
+# ========== ការកំណត់ (ត្រូវកែ) ==========
+BOT_TOKEN = "8503137382:AAH1Is0LOT62EmndDsJvin5QNxH1tik47Hg"       # យកពី @BotFather
+ADMIN_CHAT_ID = ID: -5362036603               # Chat ID របស់អ្នកគ្រប់គ្រងហាង (ទទួលការបញ្ជាទិញ)
 
+PAYMENT_INFO = {
+    "aba": "លេខគណនី ABA: 000 000 000\nឈ្មោះ: [ឈ្មោះអ្នក]",
+    "acleda": "លេខគណនី ACLEDA: 0000 0000 0000\nឈ្មោះ: [ឈ្មោះអ្នក]",
+}
+
+# ========== បញ្ជីទំនិញ (ត្រូវកែតាមហាងអ្នក) ==========
+PRODUCTS = {
+    "clothes": {
+        "name": "👕 សម្លៀកបំពាក់",
+        "items": [
+            {"id": "c1", "name": "អាវយឺត", "price": 15},
+            {"id": "c2", "name": "ខោខូវប៊យ", "price": 25},
+        ],
+    },
+    "food": {
+        "name": "🍜 អាហារ/ភេសជ្ជៈ",
+        "items": [
+            {"id": "f1", "name": "នំបុ័ង", "price": 3},
+            {"id": "f2", "name": "កាហ្វេ", "price": 2},
+        ],
+    },
+    "electronics": {
+        "name": "🔌 គ្រឿងអេឡិចត្រូនិក",
+        "items": [
+            {"id": "e1", "name": "ខ្សែសាកថ្ម", "price": 5},
+            {"id": "e2", "name": "កាសស្តាប់", "price": 12},
+        ],
+    },
+}
+
+def find_item(item_id):
+    for cat in PRODUCTS.values():
+        for it in cat["items"]:
+            if it["id"] == item_id:
+                return it
+    return None
+
+# ========== ស្ថានភាព Conversation សម្រាប់ Checkout ==========
+ASK_PAYMENT, ASK_ADDRESS = range(2)
+
+# ========== Handlers ==========
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.setdefault("cart", [])
-    keyboard = [
-        [InlineKeyboardButton(f"{p['name']} - ${p['price']}", callback_data=f"view_{pid}")]
-        for pid, p in PRODUCTS.items()
-    ]
-    keyboard.append([InlineKeyboardButton("🛒 មើលកន្ត្រក", callback_data="cart")])
+    context.user_data.setdefault("cart", {})
+    keyboard = [[InlineKeyboardButton(cat["name"], callback_data=f"cat_{key}")]
+                for key, cat in PRODUCTS.items()]
+    keyboard.append([InlineKeyboardButton("🛒 មើលកន្ត្រក", callback_data="view_cart")])
     await update.message.reply_text(
-        "សូមស្វាគមន៍មកកាន់ហាងអាវយើង! ជ្រើសរើសទំនិញខាងក្រោម៖",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        "សូមស្វាគមន៍មកកាន់ហាងអនឡាញ! 🛍️\nជ្រើសរើសប្រភេទទំនិញ៖",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def show_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    data = query.data
-    context.user_data.setdefault("cart", [])
-
-    if data.startswith("view_"):
-        pid = data.split("_", 1)[1]
-        product = PRODUCTS[pid]
-        keyboard = [
-            [InlineKeyboardButton(size, callback_data=f"add_{pid}_{size}") for size in product["sizes"]],
-            [InlineKeyboardButton("⬅️ ត្រឡប់", callback_data="back")],
-        ]
-        await query.edit_message_text(
-            f"{product['name']}\nតម្លៃ: ${product['price']}\nសូមជ្រើសរើសទំហំ៖",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
-
-    elif data.startswith("add_"):
-        _, pid, size = data.split("_")
-        product = PRODUCTS[pid]
-        context.user_data["cart"].append({"name": product["name"], "price": product["price"], "size": size})
-        await query.edit_message_text(
-            f"✅ បានដាក់ {product['name']} (ទំហំ {size}) ចូលកន្ត្រកហើយ!\n\nវាយ /start ដើម្បីបន្តទិញ ឬ /cart ដើម្បីមើលកន្ត្រក។"
-        )
-
-    elif data == "cart":
-        await show_cart(query, context)
-
-    elif data == "back":
-        await start_from_query(query, context)
-
-    elif data == "checkout":
-        await checkout(query, context)
-
-    elif data == "clear":
-        context.user_data["cart"] = []
-        await query.edit_message_text("កន្ត្រកត្រូវបានសម្អាតរួចរាល់។ វាយ /start ដើម្បីទិញបន្ត។")
-
-
-async def start_from_query(query, context):
+    cat_key = query.data.replace("cat_", "")
+    cat = PRODUCTS[cat_key]
     keyboard = [
-        [InlineKeyboardButton(f"{p['name']} - ${p['price']}", callback_data=f"view_{pid}")]
-        for pid, p in PRODUCTS.items()
+        [InlineKeyboardButton(f"{it['name']} - ${it['price']}", callback_data=f"add_{it['id']}")]
+        for it in cat["items"]
     ]
-    keyboard.append([InlineKeyboardButton("🛒 មើលកន្ត្រក", callback_data="cart")])
-    await query.edit_message_text(
-        "ជ្រើសរើសទំនិញខាងក្រោម៖", reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    keyboard.append([InlineKeyboardButton("⬅️ ត្រឡប់", callback_data="back_main")])
+    await query.edit_message_text(f"{cat['name']}\nជ្រើសរើសទំនិញដើម្បីបញ្ចូលកន្ត្រក៖",
+                                   reply_markup=InlineKeyboardMarkup(keyboard))
 
+async def add_to_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    item_id = query.data.replace("add_", "")
+    item = find_item(item_id)
+    cart = context.user_data.setdefault("cart", {})
+    cart[item_id] = cart.get(item_id, 0) + 1
+    await query.answer(f"✅ បានបញ្ចូល {item['name']} ចូលកន្ត្រក")
 
-async def show_cart(query, context):
-    cart = context.user_data.get("cart", [])
+async def view_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    cart = context.user_data.get("cart", {})
     if not cart:
-        await query.edit_message_text("កន្ត្រករបស់អ្នកទទេ។ វាយ /start ដើម្បីទិញ។")
+        await query.edit_message_text("កន្ត្រកទទេ។ សូមជ្រើសរើសទំនិញសិន។",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ ត្រឡប់", callback_data="back_main")]]))
         return
-    total = sum(item["price"] for item in cart)
-    lines = [f"- {item['name']} (ទំហំ {item['size']}) — ${item['price']}" for item in cart]
-    text = "🛒 កន្ត្រករបស់អ្នក៖\n" + "\n".join(lines) + f"\n\nសរុប: ${total}"
+    lines, total = [], 0
+    for item_id, qty in cart.items():
+        it = find_item(item_id)
+        subtotal = it["price"] * qty
+        total += subtotal
+        lines.append(f"{it['name']} x{qty} = ${subtotal}")
+    text = "🛒 កន្ត្រករបស់អ្នក៖\n\n" + "\n".join(lines) + f"\n\nសរុប: ${total}"
     keyboard = [
         [InlineKeyboardButton("✅ បញ្ជាទិញ", callback_data="checkout")],
-        [InlineKeyboardButton("🗑 សម្អាតកន្ត្រក", callback_data="clear")],
-        [InlineKeyboardButton("⬅️ ត្រឡប់", callback_data="back")],
+        [InlineKeyboardButton("⬅️ ត្រឡប់", callback_data="back_main")],
     ]
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
+async def back_main(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    keyboard = [[InlineKeyboardButton(cat["name"], callback_data=f"cat_{key}")]
+                for key, cat in PRODUCTS.items()]
+    keyboard.append([InlineKeyboardButton("🛒 មើលកន្ត្រក", callback_data="view_cart")])
+    await query.edit_message_text("ជ្រើសរើសប្រភេទទំនិញ៖", reply_markup=InlineKeyboardMarkup(keyboard))
 
-async def checkout(query, context):
-    cart = context.user_data.get("cart", [])
-    if not cart:
-        await query.edit_message_text("កន្ត្រករបស់អ្នកទទេ។")
-        return
-    context.user_data["awaiting_contact"] = True
-    await query.edit_message_text(
-        "សូមផ្ញើ ឈ្មោះ + លេខទូរស័ព្ទ + អាសយដ្ឋានដឹកជញ្ជូន របស់អ្នកជាសារមួយ ដើម្បីបញ្ចប់ការបញ្ជាទិញ។"
-    )
+# ---- Checkout flow ----
 
+async def checkout_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    keyboard = [
+        [InlineKeyboardButton("ABA", callback_data="pay_aba")],
+        [InlineKeyboardButton("ACLEDA", callback_data="pay_acleda")],
+        [InlineKeyboardButton("COD (បង់ពេលទទួល)", callback_data="pay_cod")],
+    ]
+    await query.edit_message_text("សូមជ្រើសរើសវិធីទូទាត់៖", reply_markup=InlineKeyboardMarkup(keyboard))
+    return ASK_PAYMENT
 
-async def contact_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.user_data.get("awaiting_contact"):
-        return
-    cart = context.user_data.get("cart", [])
-    total = sum(item["price"] for item in cart)
-    lines = [f"- {item['name']} (ទំហំ {item['size']}) — ${item['price']}" for item in cart]
+async def ask_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    method = query.data.replace("pay_", "")
+    context.user_data["payment_method"] = method
+    if method in PAYMENT_INFO:
+        await query.edit_message_text(
+            f"ព័ត៌មានទូទាត់៖\n{PAYMENT_INFO[method]}\n\nសូមផ្ទេរប្រាក់ រួចផ្ញើអាសយដ្ឋានដឹកជញ្ជូនរបស់អ្នកមកខាងក្រោម៖"
+        )
+    else:
+        await query.edit_message_text("សូមផ្ញើអាសយដ្ឋានដឹកជញ្ជូនរបស់អ្នក៖")
+    return ASK_ADDRESS
+
+async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    address = update.message.text
+    cart = context.user_data.get("cart", {})
+    method = context.user_data.get("payment_method", "?")
+    lines, total = [], 0
+    for item_id, qty in cart.items():
+        it = find_item(item_id)
+        subtotal = it["price"] * qty
+        total += subtotal
+        lines.append(f"{it['name']} x{qty} = ${subtotal}")
     order_text = (
-        f"🆕 ការបញ្ជាទិញថ្មី!\n"
-        f"អតិថិជន: {update.effective_user.full_name} (@{update.effective_user.username})\n"
-        f"ព័ត៌មានទំនាក់ទំនង: {update.message.text}\n\n"
-        + "\n".join(lines)
-        + f"\n\nសរុប: ${total}"
+        f"🆕 ការបញ្ជាទិញថ្មី!\n\n"
+        f"👤 អតិថិជន: {update.effective_user.full_name} (@{update.effective_user.username})\n"
+        f"📦 ទំនិញ:\n" + "\n".join(lines) +
+        f"\n💰 សរុប: ${total}\n💳 ការទូទាត់: {method}\n📍 អាសយដ្ឋាន: {address}"
     )
     await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=order_text)
-    await update.message.reply_text("🎉 អរគុណសម្រាប់ការបញ្ជាទិញ! យើងខ្ញុំនឹងទាក់ទងអ្នកឆាប់ៗនេះ។")
-    context.user_data["cart"] = []
-    context.user_data["awaiting_contact"] = False
+    await update.message.reply_text("🎉 អរគុណ! ការបញ្ជាទិញរបស់អ្នកត្រូវបានទទួល។ យើងខ្ញុំនឹងទាក់ទងអ្នកឆាប់ៗនេះ។")
+    context.user_data["cart"] = {}
+    return ConversationHandler.END
 
-
-async def cart_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    cart = context.user_data.get("cart", [])
-    if not cart:
-        await update.message.reply_text("កន្ត្រករបស់អ្នកទទេ។ វាយ /start ដើម្បីទិញ។")
-        return
-    total = sum(item["price"] for item in cart)
-    lines = [f"- {item['name']} (ទំហំ {item['size']}) — ${item['price']}" for item in cart]
-    text = "🛒 កន្ត្រករបស់អ្នក៖\n" + "\n".join(lines) + f"\n\nសរុប: ${total}"
-    keyboard = [
-        [InlineKeyboardButton("✅ បញ្ជាទិញ", callback_data="checkout")],
-        [InlineKeyboardButton("🗑 សម្អាតកន្ត្រក", callback_data="clear")],
-    ]
-    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
-
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("បានបោះបង់ការបញ្ជាទិញ។ វាយ /start ដើម្បីចាប់ផ្តើមម្តងទៀត។")
+    return ConversationHandler.END
 
 def main():
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("cart", cart_command))
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, contact_message_handler))
-    print("Bot កំពុងរត់...")
-    app.run_polling()
+    app = Application.builder().token(BOT_TOKEN).build()
 
+    checkout_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(checkout_start, pattern="^checkout$")],
+        states={
+            ASK_PAYMENT: [CallbackQueryHandler(ask_address, pattern="^pay_")],
+            ASK_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_order)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(checkout_conv)
+    app.add_handler(CallbackQueryHandler(show_category, pattern="^cat_"))
+    app.add_handler(CallbackQueryHandler(add_to_cart, pattern="^add_"))
+    app.add_handler(CallbackQueryHandler(view_cart, pattern="^view_cart$"))
+    app.add_handler(CallbackQueryHandler(back_main, pattern="^back_main$"))
+
+    print("Bot កំពុងដំណើរការ...")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
